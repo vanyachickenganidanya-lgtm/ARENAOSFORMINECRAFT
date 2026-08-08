@@ -2,8 +2,8 @@ local OSNAME, VERSION = "AuroraOS", "3.0"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
-local OS_SOURCE = "https://raw.githubusercontent.com/USER/auroraos/main/aurora_os.lua"
-local VERSION_URL = "https://raw.githubusercontent.com/USER/auroraos/main/version.txt"
+local OS_SOURCE = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/aurora_os.lua"
+local VERSION_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/version.txt"
 
 local C = { bg=colors.black, barbg=colors.blue, text=colors.white, dim=colors.lightGray,
             dark=colors.gray, accent=colors.cyan, good=colors.lime, bad=colors.red }
