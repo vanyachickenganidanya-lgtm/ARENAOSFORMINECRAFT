@@ -1,5 +1,5 @@
 local OSNAME = "AuroraOS"
-local OS_URL = "https://raw.githubusercontent.com/USER/auroraos/main/aurora_os.lua"
+local OS_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/aurora_os.lua"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local ANAMES  = { "cyan", "blue", "purple", "magenta", "lime", "orange", "red", "green" }
 
