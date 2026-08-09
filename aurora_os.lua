@@ -1,12 +1,23 @@
-local OSNAME, VERSION = "AuroraOS", "3.0"
+local OSNAME, VERSION = "AuroraOS", "4.0"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
 local OS_SOURCE = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/aurora_os.lua"
 local VERSION_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/version.txt"
+local BLOCKED_PROGS = { lua=true, shell=true, multishell=true, pastebin=true }
 
 local C = { bg=colors.black, barbg=colors.blue, text=colors.white, dim=colors.lightGray,
             dark=colors.gray, accent=colors.cyan, good=colors.lime, bad=colors.red }
+
+local _pullRaw = os.pullEventRaw
+local function pullSafe(filter)
+  while true do
+    local e = {_pullRaw(filter)}
+    if e[1] ~= "terminate" then return unpack(e) end
+  end
+end
+os.pullEventRaw = pullSafe
+os.pullEvent = pullSafe
 
 local W, H
 local CONFIG, CURRENT, signal, updateAvailable
@@ -76,7 +87,75 @@ local function setUserPass(idx, pass)
   u.hash=(pass and pass~="") and hash(pass) or nil; saveConfig(CONFIG); return true
 end
 
--- mirroring removed for reliability; OS renders to ONE primary screen
+local function normPath(p) return fs.combine("/", p or "") end
+local function startsWith(p, prefix) return p==prefix or p:sub(1, #prefix+1)==prefix.."/" end
+local function isProtected(user, path, write)
+  if not user or user.admin then return false end
+  local p = normPath(path)
+  if startsWith(p, "/.system") then return true end
+  if write and (p=="/startup" or p=="/startup.lua") then return true end
+  if write then
+    for _,fp in ipairs(CONFIG.protected or {}) do if startsWith(p, normPath(fp)) then return true end end
+  end
+  return false
+end
+local function makeFsProxy(user)
+  local real = fs
+  local proxy = {}
+  proxy.delete = function(p) if isProtected(user,p,true) then print("Access denied: "..normPath(p)) return end return real.delete(p) end
+  proxy.open = function(p,mode) local m=mode or "r"; local w=(m=="w" or m=="a" or m=="wb" or m=="ab")
+    if isProtected(user,p,w) or isProtected(user,p,false) then print("Access denied: "..normPath(p)) return end
+    return real.open(p,mode) end
+  proxy.move = function(a,b) if isProtected(user,a,true) or isProtected(user,b,true) then print("Access denied") return end return real.move(a,b) end
+  proxy.copy = function(a,b) if isProtected(user,b,true) then print("Access denied") return end return real.copy(a,b) end
+  proxy.makeDir = function(p) if isProtected(user,p,true) then print("Access denied: "..normPath(p)) return end return real.makeDir(p) end
+  proxy.list = function(p) if isProtected(user,p,false) then return {} end return real.list(p) end
+  proxy.isDir = function(p) if isProtected(user,p,false) then return false end return real.isDir(p) end
+  proxy.exists = function(p) if isProtected(user,p,false) then return false end return real.exists(p) end
+  return setmetatable(proxy, {__index=function(_,k) return real[k] end})
+end
+local function makeSandboxEnv(user) return setmetatable({ fs=makeFsProxy(user) }, {__index=_G}) end
+local function sandboxRun(line, user)
+  local progName = line:match("^%s*(%S+)")
+  local rest = line:match("^%s*%S+%s*(.*)$") or ""
+  if not progName then return end
+  if BLOCKED_PROGS[progName] then print("Blocked: "..progName) return end
+  if progName=="cd" then
+    local dir = rest:match("%S+") or "/"
+    local nd = shell.resolve(dir)
+    if isProtected(user, nd, false) then print("Access denied: "..normPath(nd)) return end
+    if fs.isDir(nd) then shell.setDir(nd) else print("Not a dir: "..dir) end return
+  end
+  local path = shell.resolveProgram(progName)
+  if not path then print("No such program: "..progName) return end
+  if isProtected(user, path, false) then print("Access denied") return end
+  local args={}
+  for w in rest:gmatch("%S+") do args[#args+1]=w end
+  os.run(makeSandboxEnv(user), path, unpack(args))
+end
+
+local function mirrorList(targets)
+  local prev0=term.current()
+  local minW,minH=9999,9999
+  for i=1,#targets do term.redirect(targets[i]); local w,h=term.getSize(); if w<minW then minW=w end; if h<minH then minH=h end end
+  term.redirect(prev0)
+  local m={}
+  for _,name in ipairs({"write","blit","setCursorPos","setCursorBlink","setTextColor","setBackgroundColor","clear","clearLine","scroll","setTextScale","setPaletteColor"}) do
+    m[name]=function(...)
+      local prev=term.current()
+      for i=1,#targets do term.redirect(targets[i]); term[name](...) end
+      term.redirect(prev)
+    end
+  end
+  m.getSize=function() return minW,minH end
+  m.getCursorPos=function() local p=term.current(); term.redirect(targets[1]); local x,y=term.getCursorPos(); term.redirect(p); return x,y end
+  m.getCursorBlink=function() local p=term.current(); term.redirect(targets[1]); local b=term.getCursorBlink(); term.redirect(p); return b end
+  m.getTextColor=function() local p=term.current(); term.redirect(targets[1]); local c=term.getTextColor(); term.redirect(p); return c end
+  m.getBackgroundColor=function() local p=term.current(); term.redirect(targets[1]); local c=term.getBackgroundColor(); term.redirect(p); return c end
+  m.isColor=function() local p=term.current(); term.redirect(targets[1]); local c=term.isColor(); term.redirect(p); return c end
+  m.getPaletteColor=function(i) local p=term.current(); term.redirect(targets[1]); local r,g,b=term.getPaletteColor(i); term.redirect(p); return r,g,b end
+  return m
+end
 
 local function gatherMonitors()
   local r={}
@@ -89,16 +168,18 @@ end
 local function pickMonitors(monitors)
   fill(colors.black)
   centerText(2, OSNAME.." - display setup", C.accent)
-  centerText(4, "Choose primary screen:", C.dim)
-  writeAt(2, 6, "0. computer screen", colors.white)
+  centerText(4, "Choose screens (mirror to both):", C.dim)
   for i,m in ipairs(monitors) do
     local mw,mh=m.term.getSize()
-    writeAt(2, 7+i, i..". "..m.side.."  ("..mw.."x"..mh..")", colors.white)
+    writeAt(2, 5+i, i..". "..m.side.."  ("..mw.."x"..mh..")", colors.white)
   end
-  local by=8+#monitors
-  writeAt(2, by, "Primary screen number (0=computer): ", colors.lightGray)
-  term.setCursorPos(2+37, by); term.setTextColor(colors.white); local a=tonumber(read())
+  local by=6+#monitors
+  writeAt(2, by,   "Primary monitor (0=computer): ", colors.lightGray)
+  term.setCursorPos(2+30, by); term.setTextColor(colors.white); local a=tonumber(read())
+  writeAt(2, by+1, "Second  monitor (0=none): ", colors.lightGray)
+  term.setCursorPos(2+30, by+1); term.setTextColor(colors.white); local b=tonumber(read())
   CONFIG.mon1 = (a and a>=1 and a<=#monitors) and monitors[a].side or nil
+  CONFIG.mon2 = (b and b>=1 and b<=#monitors and monitors[b].side~=CONFIG.mon1) and monitors[b].side or nil
   saveConfig(CONFIG)
 end
 
@@ -112,11 +193,17 @@ local function applyDisplay()
     if #monitors==1 then CONFIG.mon1=monitors[1].side; saveConfig(CONFIG)
     else pickMonitors(monitors) end
   end
-  local m=getM(CONFIG.mon1)
-  if m then local mw,mh=m.term.getSize()
-    if mw>=3 and mh>=3 then term.redirect(m.term); W,H=mw,mh
-    else m.term.clear(); m.term.setCursorPos(1,1); m.term.write("This monitor is not supported") end
+  if CONFIG.mon2==CONFIG.mon1 or not getM(CONFIG.mon2) then CONFIG.mon2=nil end
+  local targets={term.native()}
+  for _,side in ipairs({CONFIG.mon1, CONFIG.mon2}) do
+    local m=getM(side)
+    if m then local mw,mh=m.term.getSize()
+      if mw>=3 and mh>=3 then targets[#targets+1]=m.term
+      else m.term.clear(); m.term.setCursorPos(1,1); m.term.write("This monitor is not supported") end
+    end
   end
+  if #targets>=2 then local mir=mirrorList(targets); term.redirect(mir); W,H=mir.getSize()
+  elseif CONFIG.mon1 then local m=getM(CONFIG.mon1); if m then term.redirect(m.term); W,H=m.term.getSize() end end
 end
 
 local function doUpdate()
@@ -148,32 +235,42 @@ local function setup()
   local y=math.floor(H/2)+1
   writeAt(4,y, "Admin name: ",C.text); local user=read(); user=(user and user~="") and user or "admin"
   writeAt(4,y+2,"Password (empty = none): ",C.text); local p=readMasked()
-  CONFIG={mode="gui", accent=ACCENTS[1], users={{name=user, hash=(p and p~="") and hash(p) or nil, admin=true}}, rn_target=16}
+  CONFIG={mode="gui", accent=ACCENTS[1], users={{name=user, hash=(p and p~="") and hash(p) or nil, admin=true}}, rn_target=16, protected={}}
   saveConfig(CONFIG); centerText(y+5,"Saved! Starting...",C.good); sleep(1)
 end
 
 local function bootGate()
   fill(colors.black)
   centerText(math.floor(H/2)-1, OSNAME.." v"..VERSION, C.accent)
-  centerText(math.floor(H/2)+1, "[R] recovery   [M] monitors   else boot...", C.dim)
+  centerText(math.floor(H/2)+1, "[M] monitors   [R] recovery   else boot...", C.dim)
   local t=os.startTimer(2)
   while true do
-    local ev,p1=unpack({os.pullEvent()})
-    if ev=="key" and p1==keys.r then
-      fill(colors.black); term.setCursorPos(1,1)
-      print("Recovery shell. Reset: 'rm /.system/config'"); print("Type 'exit' to return.")
-      shell.run("shell"); return
-    elseif ev=="key" and p1==keys.m then
+    local ev,p1=os.pullEvent()
+    if ev=="key" and p1==keys.m then
       term.redirect(term.native()); W,H=term.getSize()
       local monitors=gatherMonitors()
       if #monitors>=1 then pickMonitors(monitors) end
       applyDisplay(); return
+    elseif ev=="key" and p1==keys.r then
+      fill(colors.black); centerText(math.floor(H/2)-1, "Recovery - admin password", C.accent)
+      writeAt(2, math.floor(H/2)+1, "Password: ", C.text)
+      term.setCursorPos(12, math.floor(H/2)+1); term.setTextColor(C.text); term.setBackgroundColor(colors.black)
+      local pw=readMasked()
+      local ok=false
+      for _,u in ipairs(CONFIG.users) do if u.admin and u.hash and hash(pw or "")==u.hash then ok=true break end end
+      if ok then
+        fill(colors.black); term.setCursorPos(1,1)
+        print("Recovery shell. 'rm /.system/config' to reset users.")
+        print("Type 'exit' to return to OS.")
+        shell.run("shell")
+      else centerText(math.floor(H/2)+3, "Access denied", C.bad); sleep(1) end
+      return
     elseif ev=="timer" and p1==t then return end
   end
 end
 
 local function boot()
-  local steps={"Loading kernel...","Mounting filesystem...","Starting drivers...","Starting network...","Loading desktop..."}
+  local steps={"Loading kernel...","Mounting filesystem...","Starting services...","Starting network...","Loading desktop..."}
   local barW=math.min(36, W-10); local bx=math.floor((W-barW)/2)+1; local by=H-3
   local logoY=math.floor(H/2)-4
   local maxLen=0; for _,l in ipairs(LOGO) do maxLen=math.max(maxLen,#l) end
@@ -264,14 +361,15 @@ local function makeAPI(rec)
   return api
 end
 
-local appTerminal, appFiles, appSettings, appUsers, appRednet, appAbout, appUpdate
+local appTerminal, appFiles, appSettings, appUsers, appSecurity, appRednet, appAbout, appUpdate
 
 appTerminal = function(api)
   api.title("Terminal")
   api.clear(C.bg); api.win.setCursorPos(1,1); api.win.setTextColor(colors.white)
-  api.rawprint(OSNAME.." terminal. 'exit' close | 'bg' minimize | 'update' ")
+  api.rawprint(OSNAME.." terminal. 'exit' close | 'bg' minimize")
+  if not CURRENT.admin then api.rawprint("(sandboxed: startup and /.system are protected)") end
   while true do
-    api.color(C.accent); api.rawprint(CURRENT.name.."@"..OSNAME..": "..shell.dir().."$ "); api.color(colors.white)
+    api.color(C.accent); api.rawprint(CURRENT.name..(CURRENT.admin and "#" or "$").." "..shell.dir().."> "); api.color(colors.white)
     local line=api.readline()
     if not line then line="" end
     local low=(line:match("^%s*(%S+)") or ""):lower()
@@ -282,7 +380,9 @@ appTerminal = function(api)
     elseif low=="clear" then api.clear(C.bg); api.win.setCursorPos(1,1)
     elseif low=="help" then api.rawprint("exit bg update lock clear help + CC cmds")
     elseif line:match("%S") then
-      local p=term.redirect(api.win); shell.run(line); term.redirect(p)
+      local p=term.redirect(api.win)
+      if CURRENT.admin then shell.run(line) else sandboxRun(line, CURRENT) end
+      term.redirect(p)
     end
   end
 end
@@ -306,9 +406,9 @@ appFiles = function(api)
       elseif a==keys.down then sel=math.min(#list,sel+1)
       elseif a==keys.enter then local nm=list[sel]; if nm then local full=fs.combine(path,nm)
         if fs.isDir(full) then path=full; list=fs.list(path) or {}; table.sort(list); sel=1
-        else local p=term.redirect(api.win); shell.run("edit",full); term.redirect(p) end end
+        else local p=term.redirect(api.win); if CURRENT.admin then shell.run("edit",full) else sandboxRun("edit "..full, CURRENT) end; term.redirect(p) end end
       elseif a==keys.backspace and path~="/" then path=fs.getDir(path); list=fs.list(path) or {}; table.sort(list); sel=1
-      elseif a==keys.e then local nm=list[sel]; if nm then local p=term.redirect(api.win); shell.run("edit",fs.combine(path,nm)); term.redirect(p) end
+      elseif a==keys.e then local nm=list[sel]; if nm then local p=term.redirect(api.win); if CURRENT.admin then shell.run("edit",fs.combine(path,nm)) else sandboxRun("edit "..fs.combine(path,nm), CURRENT) end; term.redirect(p) end
       elseif a==keys.esc then api.close(); return end
     elseif ev=="mouse_click" or ev=="monitor_touch" then
       if c==1 and b>=api.W-1 then api.close(); return end
@@ -325,7 +425,7 @@ appSettings = function(api)
     api.write(2,3,"[2] Accent color", colors.white)
     api.write(2,4,"[3] My name", colors.white)
     api.write(2,6,"User: "..CURRENT.name..(CURRENT.admin and " (admin)" or ""), C.dim)
-    api.write(2,7,"Version: "..OSNAME.." "..VERSION, C.dim)
+    api.write(2,7,OSNAME.." v"..VERSION, C.dim)
     api.write(2,api.H,"[Esc] close", C.dim)
     local ev,a,b,c=api.pull()
     if ev=="char" and a=="1" then
@@ -355,15 +455,41 @@ appUsers = function(api)
     api.write(2,1,string.format("%-3s %-12s %-6s %-4s","#","name","role","pass"),C.dim)
     for i,u in ipairs(CONFIG.users) do api.write(2,1+i,string.format("%-3d %-12s %-6s %-4s",i,u.name,u.admin and "admin" or "user",u.hash and "yes" or "no"),colors.white) end
     local oy=2+#CONFIG.users+2
-    api.write(2,oy,"[a] add [r] remove [p] pass", colors.white)
+    api.write(2,oy,"[a] add user  [d] add admin  [r] remove  [p] pass", colors.white)
     api.write(2,api.H,"[Esc] close", C.dim)
     local ev,a,b,c=api.pull()
-    if ev=="char" and a=="a" then
+    if ev=="char" and (a=="a" or a=="d") then
+      local isAdmin = (a=="d")
       api.write(2,oy+2,"Name: ",colors.white); local name=api.input(2+6,oy+2,"",false,16)
-      if name and name~="" and not findUser(name) then api.write(2,oy+3,"Pass(empty=none): ",colors.white); local p=api.input(2+18,oy+3,"",true,12); addUser(name,p,false) end
+      if name and name~="" and not findUser(name) then api.write(2,oy+3,"Pass(empty=none): ",colors.white); local p=api.input(2+18,oy+3,"",true,12); addUser(name,p,isAdmin); api.write(2,oy+4,isAdmin and "Admin added." or "User added.",C.good); api.pull() end
     elseif ev=="char" and a=="r" then api.write(2,oy+2,"Number: ",colors.white); local n=tonumber(api.input(2+8,oy+2,"",false,8)); local ok,err=removeUser(n); api.write(2,oy+3,ok and "Removed." or ("Err: "..tostring(err)),C.dim); api.pull()
     elseif ev=="char" and a=="p" then api.write(2,oy+2,"Number: ",colors.white); local n=tonumber(api.input(2+8,oy+2,"",false,8)); local u=CONFIG.users[n]
       if u then api.write(2,oy+3,"Pass(empty=remove): ",colors.white); local p=api.input(2+20,oy+3,"",true,12); setUserPass(n,p); api.write(2,oy+4,"Done.",C.good); api.pull() end
+    elseif (ev=="key" and a==keys.esc) then api.close(); return
+    elseif (ev=="mouse_click" or ev=="monitor_touch") and c==1 and b>=api.W-1 then api.close(); return end
+  end
+end
+
+appSecurity = function(api)
+  api.title("Security")
+  if not (CURRENT and CURRENT.admin) then api.clear(C.bg); api.write(2,2,"Admin only.",C.bad); api.write(2,4,"[Esc] back",C.dim)
+    while true do local ev,a=api.pull(); if ev=="key" and a==keys.esc then api.close(); return end end end
+  CONFIG.protected = CONFIG.protected or {}
+  while true do
+    api.clear(C.bg)
+    api.write(2,1,"Protected folders (non-admins can't write):", C.accent)
+    api.write(2,2,"startup and /.system are always protected", C.dim)
+    for i,p in ipairs(CONFIG.protected) do api.write(2,2+i, i..". "..p, colors.white) end
+    local oy=3+#CONFIG.protected+1
+    api.write(2,oy,"[a] add path  [r] remove", colors.white)
+    api.write(2,api.H,"[Esc] close", C.dim)
+    local ev,a,b,c=api.pull()
+    if ev=="char" and a=="a" then
+      api.write(2,oy+2,"Path: ",colors.white); local p=api.input(2+6,oy+2,"",false,20)
+      if p and p~="" then table.insert(CONFIG.protected, normPath(p)); saveConfig(CONFIG); api.write(2,oy+3,"Added.",C.good); api.pull() end
+    elseif ev=="char" and a=="r" then
+      api.write(2,oy+2,"Number: ",colors.white); local n=tonumber(api.input(2+8,oy+2,"",false,8))
+      if n and CONFIG.protected[n] then table.remove(CONFIG.protected,n); saveConfig(CONFIG); api.write(2,oy+3,"Removed.",C.good); api.pull() end
     elseif (ev=="key" and a==keys.esc) then api.close(); return
     elseif (ev=="mouse_click" or ev=="monitor_touch") and c==1 and b>=api.W-1 then api.close(); return end
   end
@@ -434,8 +560,9 @@ local function appList()
     {name="Terminal", glyph=">", col=colors.green, fn=appTerminal},
     {name="Files", glyph="F", col=colors.lightBlue, fn=appFiles},
     {name="Settings", glyph="S", col=colors.purple, fn=appSettings},
-    {name="Rednet", glyph="N", col=colors.cyan, fn=appRednet},
     {name="Users", glyph="U", col=colors.pink, fn=appUsers, admin=true},
+    {name="Security", glyph="!", col=colors.red, fn=appSecurity, admin=true},
+    {name="Rednet", glyph="N", col=colors.cyan, fn=appRednet},
     {name="About", glyph="i", col=colors.yellow, fn=appAbout},
     {name="Update", glyph="^", col=colors.lime, fn=appUpdate},
   }
@@ -541,7 +668,7 @@ end
 drawDesktop = function()
   desktopIcons={}
   paintutils.drawFilledBox(1,2,W,H-1,C.bg)
-  if H>=5 then centerText(3, OSNAME, C.accent); centerText(4, "user: "..CURRENT.name, C.dim) end
+  if H>=5 then centerText(3, OSNAME, C.accent); centerText(4, "user: "..CURRENT.name..(CURRENT.admin and " (admin)" or ""), C.dim) end
   if updateAvailable and H>=6 then centerText(5, "* update available *", C.good) end
   local apps=appList()
   local cols=math.max(1, math.floor(W/12))
