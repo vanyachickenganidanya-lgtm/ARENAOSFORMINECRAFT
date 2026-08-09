@@ -76,36 +76,7 @@ local function setUserPass(idx, pass)
   u.hash=(pass and pass~="") and hash(pass) or nil; saveConfig(CONFIG); return true
 end
 
-local function mirrorList(targets, isCol)
-  local function gcall(obj, m, def)
-    local f=obj[m]
-    if type(f)=="function" then
-      local ok,r=pcall(f); if ok then return r end
-      ok,r=pcall(f,obj); if ok then return r end
-    end
-    return def
-  end
-  local function gsize(obj)
-    local f=obj.getSize
-    if type(f)=="function" then
-      local ok,w,h=pcall(f); if ok then return w,h end
-      ok,w,h=pcall(f,obj); if ok then return w,h end
-    end
-    return 51,19
-  end
-  local mw,mh=gsize(targets[1])
-  for i=2,#targets do local w,h=gsize(targets[i]); if w and h then mw=math.min(mw,w); mh=math.min(mh,h) end end
-  local fwd={"write","blit","setCursorPos","setTextColor","setBackgroundColor","clear","clearLine","scroll","setTextScale","setPaletteColor"}
-  local t={}
-  for _,m in ipairs(fwd) do local meth=m; t[meth]=function(...) for _,tg in ipairs(targets) do if type(tg[meth])=="function" then tg[meth](...) end end end end
-  t.getSize=function() return mw,mh end
-  t.getCursorPos=function() return gcall(targets[1],"getCursorPos",1,1) end
-  t.getTextColor=function() return gcall(targets[1],"getTextColor",colors.white) end
-  t.getBackgroundColor=function() return gcall(targets[1],"getBackgroundColor",colors.black) end
-  t.isColor=function() return isCol end
-  t.getPaletteColor=function(i) return gcall(targets[1],"getPaletteColor",0) end
-  return t
-end
+-- mirroring removed for reliability; OS renders to ONE primary screen
 
 local function gatherMonitors()
   local r={}
@@ -117,19 +88,17 @@ end
 
 local function pickMonitors(monitors)
   fill(colors.black)
-  centerText(2, OSNAME.." - monitor setup", C.accent)
-  centerText(4, "Attached monitors:", C.dim)
+  centerText(2, OSNAME.." - display setup", C.accent)
+  centerText(4, "Choose primary screen:", C.dim)
+  writeAt(2, 6, "0. computer screen", colors.white)
   for i,m in ipairs(monitors) do
     local mw,mh=m.term.getSize()
-    writeAt(2, 5+i, i..". "..m.side.."  ("..mw.."x"..mh..")", colors.white)
+    writeAt(2, 7+i, i..". "..m.side.."  ("..mw.."x"..mh..")", colors.white)
   end
-  local by=5+#monitors+2
-  writeAt(2, by,   "Primary monitor number (0=computer only): ", colors.lightGray)
-  term.setCursorPos(2+43, by); term.setTextColor(colors.white); local a=tonumber(read())
-  writeAt(2, by+1, "Second monitor number (0=none): ", colors.lightGray)
-  term.setCursorPos(2+31, by+1); term.setTextColor(colors.white); local b=tonumber(read())
+  local by=8+#monitors
+  writeAt(2, by, "Primary screen number (0=computer): ", colors.lightGray)
+  term.setCursorPos(2+37, by); term.setTextColor(colors.white); local a=tonumber(read())
   CONFIG.mon1 = (a and a>=1 and a<=#monitors) and monitors[a].side or nil
-  CONFIG.mon2 = (b and b>=1 and b<=#monitors and monitors[b].side~=CONFIG.mon1) and monitors[b].side or nil
   saveConfig(CONFIG)
 end
 
@@ -143,16 +112,11 @@ local function applyDisplay()
     if #monitors==1 then CONFIG.mon1=monitors[1].side; saveConfig(CONFIG)
     else pickMonitors(monitors) end
   end
-  if CONFIG.mon2==CONFIG.mon1 or not getM(CONFIG.mon2) then CONFIG.mon2=nil end
-  local targets={term.native()}
-  for _,side in ipairs({CONFIG.mon1, CONFIG.mon2}) do
-    local m=getM(side)
-    if m then local mw,mh=m.term.getSize()
-      if mw>=3 and mh>=3 then targets[#targets+1]=m.term
-      else m.term.clear(); m.term.setCursorPos(1,1); m.term.write("This monitor is not supported") end
-    end
+  local m=getM(CONFIG.mon1)
+  if m then local mw,mh=m.term.getSize()
+    if mw>=3 and mh>=3 then term.redirect(m.term); W,H=mw,mh
+    else m.term.clear(); m.term.setCursorPos(1,1); m.term.write("This monitor is not supported") end
   end
-  if #targets>=2 then local mir=mirrorList(targets, term.isColor()); term.redirect(mir); W,H=mir.getSize() end
 end
 
 local function doUpdate()
