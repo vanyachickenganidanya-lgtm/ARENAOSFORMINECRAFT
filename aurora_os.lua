@@ -1,16 +1,28 @@
-local OSNAME, VERSION = "AuroraOS", "5.1"
+local OSNAME, VERSION = "AuroraOS", "6.0"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
 local OS_SOURCE = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/aurora_os.lua"
 local VERSION_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/version.txt"
-local BLOCKED_PROGS = { lua=true, shell=true, multishell=true, pastebin=true }
+local BLOCKED_PROGS = { shell=true, multishell=true }
 
 os.pullEvent = os.pullEventRaw
 local NATIVE_COLOR = term.isColor()
 
 local C = { bg=colors.black, barbg=colors.blue, text=colors.white, dim=colors.lightGray,
             dark=colors.gray, accent=colors.cyan, good=colors.lime, bad=colors.red }
+
+local PALETTE = {
+  [colors.white]=0xE6EDF3, [colors.orange]=0xFFA657, [colors.magenta]=0xD2A8FF,
+  [colors.lightBlue]=0x79C0FF, [colors.yellow]=0xE3B341, [colors.lime]=0x7EE787,
+  [colors.pink]=0xFF9EC4, [colors.gray]=0x21262D, [colors.lightGray]=0x8B949E,
+  [colors.cyan]=0x39D0D8, [colors.purple]=0xA371F7, [colors.blue]=0x3B82F6,
+  [colors.brown]=0xDBAB09, [colors.green]=0x3FB950, [colors.red]=0xF85149,
+  [colors.black]=0x0D1117,
+}
+local function applyTheme()
+  for col, hex in pairs(PALETTE) do pcall(term.setPaletteColor, col, hex) end
+end
 
 local W, H
 local CONFIG, CURRENT, signal, updateAvailable
@@ -107,11 +119,51 @@ local function makeFsProxy(user)
   proxy.exists = function(p) if isProtected(user,p,false) then return false end return real.exists(p) end
   return setmetatable(proxy, {__index=function(_,k) return real[k] end})
 end
-local function makeSandboxEnv(user) return setmetatable({ fs=makeFsProxy(user) }, {__index=_G}) end
+local function makeSandboxEnv(user) return setmetatable({ fs=makeFsProxy(user), shell=shell, multishell=multishell, term=term, window=window, colors=colors, keys=keys }, {__index=_G}) end
+
+local function sandboxLua(user)
+  local proxy = makeFsProxy(user)
+  local pm = getmetatable(proxy); if pm then pm.__metatable=false end
+  local sG
+  local function sbLoad(src)
+    local fn, err = loadstring(src)
+    if not fn then return nil, err end
+    setfenv(fn, sG); return fn
+  end
+  sG = setmetatable({
+    fs=proxy, shell=shell, multishell=multishell, term=term, window=window, colors=colors, keys=keys,
+    http=http, os=os, io=io, math=math, string=string, table=table, coroutine=coroutine,
+    tostring=tostring, tonumber=tonumber, type=type, pairs=pairs, ipairs=ipairs, print=print, write=write,
+    read=read, pcall=pcall, xpcall=xpcall, error=error, assert=assert, setmetatable=setmetatable,
+    getmetatable=getmetatable, rawget=rawget, rawset=rawset, rawequal=rawequal, unpack=unpack, select=select,
+    next=next, sleep=sleep, rednet=rednet, gps=gps, peripheral=peripheral, rs=rs, commands=commands,
+    turtle=turtle, pocket=pocket, bit=bit, bit32=bit32, loadstring=function(s) return sbLoad(s) end,
+  }, {__index=_G})
+  sG._G = sG
+  print("AuroraOS Lua (sandboxed). 'exit' to leave.")
+  while true do
+    write("> ")
+    local ln = read()
+    if ln==nil or ln:lower()=="exit" then break end
+    local fn, err = sbLoad("return "..ln)
+    if not fn then fn, err = sbLoad(ln) end
+    if not fn then print(err) else
+      local res = {pcall(fn)}
+      if not res[1] then print(res[2])
+      else
+        local parts={}
+        for i=2,#res do parts[#parts+1]=tostring(res[i]) end
+        if #parts>0 then print(table.concat(parts, "\t")) end
+      end
+    end
+  end
+end
+
 local function sandboxRun(line, user)
   local progName = line:match("^%s*(%S+)")
   local rest = line:match("^%s*%S+%s*(.*)$") or ""
   if not progName then return end
+  if progName=="lua" then sandboxLua(user) return end
   if BLOCKED_PROGS[progName] then print("Blocked: "..progName) return end
   if progName=="cd" then
     local dir = rest:match("%S+") or "/"
@@ -209,6 +261,22 @@ local function checkUpdate()
     if v~="" and v~=VERSION then updateAvailable=true end end
 end
 
+local BUILTIN_APPS = {
+  { url="https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/fastfetch.lua", file="/apps/fastfetch.lua" },
+}
+local function fetchBuiltinApps()
+  fs.makeDir("/apps")
+  for _, a in ipairs(BUILTIN_APPS) do
+    if not fs.exists(a.file) then
+      local h = http.get(a.url)
+      if h then
+        local b = h.readAll(); h.close()
+        if b and b ~= "" then local f = fs.open(a.file, "w"); f.write(b); f.close() end
+      end
+    end
+  end
+end
+
 local LOGO = {
   "      .:::::::::::::::.      ",
   "    .'                 '.    ",
@@ -260,6 +328,7 @@ local function bootGate()
 end
 
 local function boot()
+  applyTheme()
   local steps={"Loading kernel...","Mounting filesystem...","Starting services...","Starting network...","Loading desktop..."}
   local barW=math.min(36, W-10); local bx=math.floor((W-barW)/2)+1; local by=H-3
   local logoY=math.floor(H/2)-4
@@ -760,7 +829,7 @@ local function main()
   applyDisplay()
   if not NATIVE_COLOR then fill(colors.black); print(OSNAME.." needs an advanced (color) computer."); sleep(2) end
   C.accent=CONFIG.accent or colors.cyan
-  bootGate(); boot(); pcall(checkUpdate)
+  bootGate(); boot(); pcall(checkUpdate); pcall(fetchBuiltinApps)
   while true do
     login()
     local r=wm()
