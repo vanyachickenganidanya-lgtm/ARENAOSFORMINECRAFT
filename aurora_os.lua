@@ -6,18 +6,11 @@ local OS_SOURCE = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/
 local VERSION_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/version.txt"
 local BLOCKED_PROGS = { lua=true, shell=true, multishell=true, pastebin=true }
 
+os.pullEvent = os.pullEventRaw
+local NATIVE_COLOR = term.isColor()
+
 local C = { bg=colors.black, barbg=colors.blue, text=colors.white, dim=colors.lightGray,
             dark=colors.gray, accent=colors.cyan, good=colors.lime, bad=colors.red }
-
-local _pullRaw = os.pullEventRaw
-local function pullSafe(filter)
-  while true do
-    local e = {_pullRaw(filter)}
-    if e[1] ~= "terminate" then return unpack(e) end
-  end
-end
-os.pullEventRaw = pullSafe
-os.pullEvent = pullSafe
 
 local W, H
 local CONFIG, CURRENT, signal, updateAvailable
@@ -152,7 +145,7 @@ local function mirrorList(targets)
   m.getCursorBlink=function() local p=term.current(); term.redirect(targets[1]); local b=term.getCursorBlink(); term.redirect(p); return b end
   m.getTextColor=function() local p=term.current(); term.redirect(targets[1]); local c=term.getTextColor(); term.redirect(p); return c end
   m.getBackgroundColor=function() local p=term.current(); term.redirect(targets[1]); local c=term.getBackgroundColor(); term.redirect(p); return c end
-  m.isColor=function() local p=term.current(); term.redirect(targets[1]); local c=term.isColor(); term.redirect(p); return c end
+  m.isColor=function() return NATIVE_COLOR end
   m.getPaletteColor=function(i) local p=term.current(); term.redirect(targets[1]); local r,g,b=term.getPaletteColor(i); term.redirect(p); return r,g,b end
   return m
 end
@@ -189,10 +182,7 @@ local function applyDisplay()
   local monitors=gatherMonitors()
   if #monitors==0 then return end
   local function getM(side) for _,m in ipairs(monitors) do if m.side==side then return m end end end
-  if not getM(CONFIG.mon1) then
-    if #monitors==1 then CONFIG.mon1=monitors[1].side; saveConfig(CONFIG)
-    else pickMonitors(monitors) end
-  end
+  if not CONFIG.mon1 or not getM(CONFIG.mon1) then return end
   if CONFIG.mon2==CONFIG.mon1 or not getM(CONFIG.mon2) then CONFIG.mon2=nil end
   local targets={term.native()}
   for _,side in ipairs({CONFIG.mon1, CONFIG.mon2}) do
@@ -203,7 +193,7 @@ local function applyDisplay()
     end
   end
   if #targets>=2 then local mir=mirrorList(targets); term.redirect(mir); W,H=mir.getSize()
-  elseif CONFIG.mon1 then local m=getM(CONFIG.mon1); if m then term.redirect(m.term); W,H=m.term.getSize() end end
+  else local m=getM(CONFIG.mon1); if m then term.redirect(m.term); W,H=m.term.getSize() end end
 end
 
 local function doUpdate()
@@ -768,7 +758,7 @@ local function main()
     setup()
   end
   applyDisplay()
-  if not term.isColor() then fill(colors.black); print(OSNAME.." needs an advanced (color) computer."); sleep(2) end
+  if not NATIVE_COLOR then fill(colors.black); print(OSNAME.." needs an advanced (color) computer."); sleep(2) end
   C.accent=CONFIG.accent or colors.cyan
   bootGate(); boot(); pcall(checkUpdate)
   while true do
