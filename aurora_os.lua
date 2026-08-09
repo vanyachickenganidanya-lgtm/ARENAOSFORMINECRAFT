@@ -1,4 +1,4 @@
-local OSNAME, VERSION = "AuroraOS", "4.0"
+local OSNAME, VERSION = "AuroraOS", "5.1"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
