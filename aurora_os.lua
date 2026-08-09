@@ -76,18 +76,34 @@ local function setUserPass(idx, pass)
   u.hash=(pass and pass~="") and hash(pass) or nil; saveConfig(CONFIG); return true
 end
 
-local function mirrorList(targets)
-  local mw,mh=targets[1].getSize()
-  for i=2,#targets do local w,h=targets[i].getSize(); mw=math.min(mw,w); mh=math.min(mh,h) end
+local function mirrorList(targets, isCol)
+  local function gcall(obj, m, def)
+    local f=obj[m]
+    if type(f)=="function" then
+      local ok,r=pcall(f); if ok then return r end
+      ok,r=pcall(f,obj); if ok then return r end
+    end
+    return def
+  end
+  local function gsize(obj)
+    local f=obj.getSize
+    if type(f)=="function" then
+      local ok,w,h=pcall(f); if ok then return w,h end
+      ok,w,h=pcall(f,obj); if ok then return w,h end
+    end
+    return 51,19
+  end
+  local mw,mh=gsize(targets[1])
+  for i=2,#targets do local w,h=gsize(targets[i]); if w and h then mw=math.min(mw,w); mh=math.min(mh,h) end end
   local fwd={"write","blit","setCursorPos","setTextColor","setBackgroundColor","clear","clearLine","scroll","setTextScale","setPaletteColor"}
   local t={}
-  for _,m in ipairs(fwd) do local meth=m; t[meth]=function(...) for _,tg in ipairs(targets) do tg[meth](...) end end end
+  for _,m in ipairs(fwd) do local meth=m; t[meth]=function(...) for _,tg in ipairs(targets) do if type(tg[meth])=="function" then tg[meth](...) end end end end
   t.getSize=function() return mw,mh end
-  t.getCursorPos=function() return targets[1].getCursorPos() end
-  t.getTextColor=function() return targets[1].getTextColor() end
-  t.getBackgroundColor=function() return targets[1].getBackgroundColor() end
-  t.isColor=function() return targets[1].isColor() end
-  t.getPaletteColor=function(i) return targets[1].getPaletteColor(i) end
+  t.getCursorPos=function() return gcall(targets[1],"getCursorPos",1,1) end
+  t.getTextColor=function() return gcall(targets[1],"getTextColor",colors.white) end
+  t.getBackgroundColor=function() return gcall(targets[1],"getBackgroundColor",colors.black) end
+  t.isColor=function() return isCol end
+  t.getPaletteColor=function(i) return gcall(targets[1],"getPaletteColor",0) end
   return t
 end
 
@@ -136,7 +152,7 @@ local function applyDisplay()
       else m.term.clear(); m.term.setCursorPos(1,1); m.term.write("This monitor is not supported") end
     end
   end
-  if #targets>=2 then local mir=mirrorList(targets); term.redirect(mir); W,H=mir.getSize() end
+  if #targets>=2 then local mir=mirrorList(targets, term.isColor()); term.redirect(mir); W,H=mir.getSize() end
 end
 
 local function doUpdate()
