@@ -1,9 +1,10 @@
-local OSNAME, VERSION = "AuroraOS", "6.3"
+local OSNAME, VERSION = "AuroraOS", "6.4"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
 local OS_SOURCE = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/aurora_os.lua"
 local VERSION_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/version.txt"
+local SERVER_OS_URL = "https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/server_os.lua"
 local BLOCKED_PROGS = { shell=true, multishell=true }
 
 os.pullEvent = os.pullEventRaw
@@ -337,20 +338,37 @@ local function biosSettings()
   term.setTextColor(colors.green); print("Saved."); sleep(1)
 end
 
+local function installServerOS()
+  term.redirect(term.native())
+  term.setBackgroundColor(colors.blue); term.clear(); term.setCursorPos(1,1)
+  term.setTextColor(colors.white); print("Installing Server OS from GitHub...")
+  local h = http.get(SERVER_OS_URL)
+  if not h then term.setTextColor(colors.red); print("Failed (HTTP off? server_os.lua not in repo?)"); sleep(3); return end
+  local b = h.readAll(); h.close()
+  if not b or b=="" then term.setTextColor(colors.red); print("Empty response"); sleep(2); return end
+  local f = fs.open("/server_os.lua","w"); f.write(b); f.close()
+  term.setTextColor(colors.yellow); print("Installed -> /server_os.lua")
+  term.setTextColor(colors.lightGray); print("Set as default boot? (Y/N)")
+  term.setTextColor(colors.white)
+  local ev,p1=os.pullEvent("key")
+  if p1==keys.y then CONFIG.bootDefault="/server_os.lua"; saveConfig(CONFIG); term.setTextColor(colors.green); print("Default set. Rebooting..."); sleep(1.5); os.reboot() end
+  sleep(1)
+end
+
 local function biosMenu()
   while true do
     term.redirect(term.native())
     applyTheme()
     term.setBackgroundColor(colors.blue); term.clear(); term.setCursorPos(1,1)
-    local bw=math.min(W-4,36); local bh=12; local bx=math.floor((W-bw)/2)+1; local by=math.floor((H-bh)/2)+1
+    local bw=math.min(W-4,36); local bh=13; local bx=math.floor((W-bw)/2)+1; local by=math.floor((H-bh)/2)+1
     paintutils.drawFilledBox(bx,by,bx+bw-1,by+bh-1, colors.lightGray)
     paintutils.drawBox(bx,by,bx+bw-1,by+bh-1, colors.white)
     term.setBackgroundColor(colors.lightGray)
     term.setTextColor(colors.blue); term.setCursorPos(bx+2,by+1); term.write("AuroraOS BIOS Setup Utility")
     term.setTextColor(colors.black)
-    local opts={"1  Boot AuroraOS","2  Boot CraftOS","3  Boot other file","4  Recovery (no password)","5  Settings (delay, default)","6  Monitors","Q  Power off"}
+    local opts={"1  Boot AuroraOS","2  Boot CraftOS","3  Boot other file","4  Recovery (no password)","5  Settings (delay, default)","6  Monitors","7  Install Server OS","Q  Power off"}
     for i,o in ipairs(opts) do term.setCursorPos(bx+3,by+2+i); term.write(o) end
-    term.setTextColor(colors.blue); term.setCursorPos(bx+2,by+bh-1); term.write("Press 1-6 or Q")
+    term.setTextColor(colors.blue); term.setCursorPos(bx+2,by+bh-1); term.write("Press 1-7 or Q")
     local ev,p1=os.pullEvent()
     if ev=="key" then
       if p1==keys.one then return true
@@ -360,6 +378,7 @@ local function biosMenu()
       elseif p1==keys.five then biosSettings()
       elseif p1==keys.six then local monitors=gatherMonitors()
         if #monitors>=1 then term.redirect(term.native()); W,H=term.getSize(); pickMonitors(monitors) end
+      elseif p1==keys.seven then installServerOS()
       elseif p1==keys.q then os.shutdown() end
     end
   end
