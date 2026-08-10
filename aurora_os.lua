@@ -18,14 +18,15 @@ if not fs.exists(MOD) then
   end
 end
 
-if not os.loadAPI(MOD) then
+local ok, C = pcall(dofile, MOD)
+if not ok or type(C) ~= "table" then
   print("ERROR: cannot load " .. MOD)
+  if not ok then print(tostring(C)) end
   print("Fix HTTP / file, then reboot and run 'update'.")
   term.clear(); term.setCursorPos(1, 1)
   while true do term.setTextColor(colors.lightGray); term.write("> "); shell.run(read() or "") end
 end
 
-local C = commands  -- global set by os.loadAPI (file basename)
 _G.server = C
 HISTORY = {}
 if not fs.isDir("/bin") then fs.makeDir("/bin") end
