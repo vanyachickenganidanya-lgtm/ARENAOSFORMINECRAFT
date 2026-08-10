@@ -1,4 +1,4 @@
-local OSNAME, VERSION = "AuroraOS", "6.0"
+local OSNAME, VERSION = "AuroraOS", "6.1"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
@@ -297,34 +297,99 @@ local function setup()
   saveConfig(CONFIG); centerText(y+5,"Saved! Starting...",C.good); sleep(1)
 end
 
-local function bootGate()
-  fill(colors.black)
-  centerText(math.floor(H/2)-1, OSNAME.." v"..VERSION, C.accent)
-  centerText(math.floor(H/2)+1, "[M] monitors   [R] recovery   else boot...", C.dim)
-  local t=os.startTimer(2)
+local function recoveryShell()
+  term.redirect(term.native())
+  term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
+  term.setTextColor(colors.yellow); print("Recovery shell (no password).")
+  term.setTextColor(colors.lightGray); print("'rm /.system/config' to reset users. 'exit' to reboot.")
+  shell.run("shell")
+end
+
+local function bootOther()
+  term.redirect(term.native())
+  term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
+  term.setTextColor(colors.cyan); print("Bootable .lua files in /:")
+  local files={}
+  for _,f in ipairs(fs.list("/")) do
+    if f:sub(-4)==".lua" then files[#files+1]=f; print(#files..". "..f) end
+  end
+  if #files==0 then term.setTextColor(colors.red); print("No .lua files found."); sleep(1.5); return end
+  term.setTextColor(colors.lightGray); term.write("Number: "); term.setTextColor(colors.white)
+  local n=tonumber(read())
+  if n and files[n] then shell.run("/"..files[n]) end
+end
+
+local function biosSettings()
+  term.redirect(term.native())
+  term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
+  term.setTextColor(colors.cyan); print("BIOS Settings")
+  term.setTextColor(colors.lightGray); term.write("Boot delay sec (Enter=keep "..tostring(CONFIG.bootDelay or 1.5).."): ")
+  term.setTextColor(colors.white); local d=tonumber(read())
+  if d then CONFIG.bootDelay=d; saveConfig(CONFIG) end
+  term.setTextColor(colors.lightGray); print("Default boot: 1=AuroraOS  2=CraftOS  (Enter=keep)")
+  term.setTextColor(colors.white); local b=read()
+  if b=="1" then CONFIG.bootDefault="aurora"; saveConfig(CONFIG)
+  elseif b=="2" then CONFIG.bootDefault="craftos"; saveConfig(CONFIG) end
+  term.setTextColor(colors.lightGray); print("Set secret BIOS key: press a key now (Esc=keep)")
+  local ev2,p2=os.pullEvent("key")
+  if p2 and p2~=keys.escape then CONFIG.secretKey=p2; saveConfig(CONFIG); term.setTextColor(colors.green); print("Secret key set.") end
+  term.setTextColor(colors.green); print("Saved."); sleep(1)
+end
+
+local function biosMenu()
+  while true do
+    term.redirect(term.native())
+    applyTheme()
+    term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
+    term.setTextColor(colors.cyan); print("== "..OSNAME.." BIOS ==")
+    term.setTextColor(colors.white)
+    print("[1] Boot AuroraOS")
+    print("[2] Boot CraftOS (shell)")
+    print("[3] Boot other file")
+    print("[4] Recovery (no password)")
+    print("[5] Settings (delay, default)")
+    print("[6] Monitors")
+    term.setTextColor(colors.lightGray); print("[Q] Power off")
+    local ev,p1=os.pullEvent()
+    if ev=="key" then
+      if p1==keys.one then return true
+      elseif p1==keys.two then shell.run("shell"); os.reboot()
+      elseif p1==keys.three then bootOther(); os.reboot()
+      elseif p1==keys.four then recoveryShell(); os.reboot()
+      elseif p1==keys.five then biosSettings()
+      elseif p1==keys.six then local monitors=gatherMonitors()
+        if #monitors>=1 then term.redirect(term.native()); W,H=term.getSize(); pickMonitors(monitors) end
+      elseif p1==keys.q then os.shutdown() end
+    end
+  end
+end
+
+local function bootMenu()
+  term.redirect(term.native())
+  applyTheme()
+  term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
+  term.setTextColor(colors.cyan); print(OSNAME.." v"..VERSION)
+  term.setTextColor(colors.lightGray); print("Starting...")
+  local secret=CONFIG.secretKey or keys.b
+  local delay=CONFIG.bootDelay or 2
+  local presses=0
+  local t=os.startTimer(delay)
+  local enter=false
   while true do
     local ev,p1=os.pullEvent()
-    if ev=="key" and p1==keys.m then
-      term.redirect(term.native()); W,H=term.getSize()
-      local monitors=gatherMonitors()
-      if #monitors>=1 then pickMonitors(monitors) end
-      applyDisplay(); return
-    elseif ev=="key" and p1==keys.r then
-      fill(colors.black); centerText(math.floor(H/2)-1, "Recovery - admin password", C.accent)
-      writeAt(2, math.floor(H/2)+1, "Password: ", C.text)
-      term.setCursorPos(12, math.floor(H/2)+1); term.setTextColor(C.text); term.setBackgroundColor(colors.black)
-      local pw=readMasked()
-      local ok=false
-      for _,u in ipairs(CONFIG.users) do if u.admin and u.hash and hash(pw or "")==u.hash then ok=true break end end
-      if ok then
-        fill(colors.black); term.setCursorPos(1,1)
-        print("Recovery shell. 'rm /.system/config' to reset users.")
-        print("Type 'exit' to return to OS.")
-        shell.run("shell")
-      else centerText(math.floor(H/2)+3, "Access denied", C.bad); sleep(1) end
-      return
-    elseif ev=="timer" and p1==t then return end
+    if ev=="key" and p1==secret then
+      presses=presses+1
+      if presses>=3 then enter=true; break end
+      t=os.startTimer(delay)
+    elseif ev=="timer" and p1==t then break end
   end
+  if not enter then
+    local def=CONFIG.bootDefault or "aurora"
+    if def=="craftos" then shell.run("shell"); os.reboot() end
+    if def:sub(1,1)=="/" then shell.run(def); os.reboot() end
+    return true
+  end
+  return biosMenu()
 end
 
 local function boot()
@@ -727,23 +792,29 @@ end
 drawDesktop = function()
   desktopIcons={}
   paintutils.drawFilledBox(1,2,W,H-1,C.bg)
-  if H>=5 then centerText(3, OSNAME, C.accent); centerText(4, "user: "..CURRENT.name..(CURRENT.admin and " (admin)" or ""), C.dim) end
-  if updateAvailable and H>=6 then centerText(5, "* update available *", C.good) end
+  if H>=6 then
+    paintutils.drawFilledBox(1,2,W,5, C.dark)
+    paintutils.drawFilledBox(1,6,W,6, C.accent)
+  end
+  if H>=4 then centerText(3, OSNAME.." v"..VERSION, C.accent) end
+  if H>=5 then centerText(4, CURRENT.name..(CURRENT.admin and "  (admin)" or ""), C.dim) end
+  if updateAvailable and H>=5 then writeAt(2,5,"* update available *",C.good,C.dark) end
   local apps=appList()
-  local cols=math.max(1, math.floor(W/12))
-  local iw,ih,gx,gy=7,3,2,1
+  local cols=math.max(1, math.floor(W/13))
+  local iw,ih,gx,gy=8,3,2,1
   local sx=math.floor((W-(cols*iw+(cols-1)*gx))/2)+1
-  local sy=7
-  for _,e in ipairs(apps) do
+  local sy=8
+  for idx,e in ipairs(apps) do
     if not(e.admin and not (CURRENT and CURRENT.admin)) then
       local r=math.floor(#desktopIcons/cols); local c=#desktopIcons%cols
       local x=sx+c*(iw+gx); local y=sy+r*(ih+gy+1)
       if y+ih>H-1 then break end
-      paintutils.drawFilledBox(x,y,x+iw-1,y+ih-1, e.col or colors.gray)
-      paintutils.drawBox(x,y,x+iw-1,y+ih-1, colors.white)
-      writeAt(x+math.floor(iw/2), y+1, e.glyph or "?", colors.white, e.col or colors.gray)
+      paintutils.drawFilledBox(x,y,x+iw-1,y+ih-1, e.col or C.dark)
+      paintutils.drawBox(x,y,x+iw-1,y+ih-1, C.accent)
+      writeAt(x, y, tostring(idx), C.bg, C.accent)
+      writeAt(x+math.floor(iw/2), y+1, e.glyph or "?", colors.white, e.col or C.dark)
       local nm=e.name; if #nm>iw then nm=nm:sub(1,iw) end
-      writeAt(math.max(1,x+math.floor((iw-#nm)/2)), y+ih, nm, colors.white)
+      writeAt(math.max(1,x+math.floor((iw-#nm)/2)), y+ih, nm, C.dim)
       table.insert(desktopIcons,{entry=e,x=x,y=y,w=iw,h=ih})
     end
   end
@@ -811,7 +882,16 @@ local function wm()
       elseif y==1 then handleTitlebarClick(x)
       elseif focused then resumeWith(focused,{ev,event[2],event[3],event[4]-1})
       else handleDesktopClick(x,y) end
-    elseif ev=="key" or ev=="char" or ev=="paste" then
+    elseif ev=="key" then
+      local d={[keys.one]=1,[keys.two]=2,[keys.three]=3,[keys.four]=4,[keys.five]=5,[keys.six]=6,[keys.seven]=7,[keys.eight]=8,[keys.nine]=9}
+      if not focused and d[event[2]] then
+        local apps=appList(); local e=apps[d[event[2]]]
+        if e and not(e.admin and not (CURRENT and CURRENT.admin)) then launch(e) end
+      elseif event[2]==keys.tab and #windows>=1 then
+        local idx=1; for i,rec in ipairs(windows) do if rec==focused then idx=i break end end
+        focus(windows[idx%#windows+1])
+      elseif focused then resumeWith(focused,event) end
+    elseif ev=="char" or ev=="paste" then
       if focused then resumeWith(focused,event) end
     else
       for _,rec in ipairs(windows) do resumeWith(rec,event) end
@@ -822,6 +902,7 @@ end
 
 local function main()
   CONFIG=loadConfig() or {users={}}
+  bootMenu()
   if not CONFIG.users or #CONFIG.users==0 then
     term.redirect(term.native()); W,H=term.getSize()
     setup()
@@ -829,7 +910,7 @@ local function main()
   applyDisplay()
   if not NATIVE_COLOR then fill(colors.black); print(OSNAME.." needs an advanced (color) computer."); sleep(2) end
   C.accent=CONFIG.accent or colors.cyan
-  bootGate(); boot(); pcall(checkUpdate); pcall(fetchBuiltinApps)
+  boot(); pcall(checkUpdate); pcall(fetchBuiltinApps)
   while true do
     login()
     local r=wm()
