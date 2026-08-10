@@ -1,4 +1,4 @@
-local OSNAME, VERSION = "AuroraOS", "6.1"
+local OSNAME, VERSION = "AuroraOS", "6.2"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
@@ -340,16 +340,16 @@ local function biosMenu()
   while true do
     term.redirect(term.native())
     applyTheme()
-    term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
-    term.setTextColor(colors.cyan); print("== "..OSNAME.." BIOS ==")
-    term.setTextColor(colors.white)
-    print("[1] Boot AuroraOS")
-    print("[2] Boot CraftOS (shell)")
-    print("[3] Boot other file")
-    print("[4] Recovery (no password)")
-    print("[5] Settings (delay, default)")
-    print("[6] Monitors")
-    term.setTextColor(colors.lightGray); print("[Q] Power off")
+    term.setBackgroundColor(colors.blue); term.clear(); term.setCursorPos(1,1)
+    local bw=math.min(W-4,36); local bh=12; local bx=math.floor((W-bw)/2)+1; local by=math.floor((H-bh)/2)+1
+    paintutils.drawFilledBox(bx,by,bx+bw-1,by+bh-1, colors.lightGray)
+    paintutils.drawBox(bx,by,bx+bw-1,by+bh-1, colors.white)
+    term.setBackgroundColor(colors.lightGray)
+    term.setTextColor(colors.blue); term.setCursorPos(bx+2,by+1); term.write("AuroraOS BIOS Setup Utility")
+    term.setTextColor(colors.black)
+    local opts={"1  Boot AuroraOS","2  Boot CraftOS","3  Boot other file","4  Recovery (no password)","5  Settings (delay, default)","6  Monitors","Q  Power off"}
+    for i,o in ipairs(opts) do term.setCursorPos(bx+3,by+2+i); term.write(o) end
+    term.setTextColor(colors.blue); term.setCursorPos(bx+2,by+bh-1); term.write("Press 1-6 or Q")
     local ev,p1=os.pullEvent()
     if ev=="key" then
       if p1==keys.one then return true
@@ -727,6 +727,7 @@ minimizeWindow = function(rec)
   end
 end
 closeRec = function(rec)
+  if not rec or rec.noclose then return end
   rec.dead=true
   for i=#windows,1,-1 do if windows[i]==rec then table.remove(windows,i) break end end
   if focused==rec then
@@ -740,7 +741,7 @@ launch = function(entry)
   if #windows>=12 then return end
   local surf=window.create(term.current(),1,2,W,H-2)
   surf.setVisible(false)
-  local rec={surf=surf, minimized=false, dead=false, title=entry.name, entry=entry}
+  local rec={surf=surf, minimized=false, dead=false, title=entry.name, entry=entry, noclose=entry.noclose or false}
   rec.api=makeAPI(rec)
   if entry.fn then
     rec.co=coroutine.create(function() entry.fn(rec.api) end)
@@ -752,6 +753,7 @@ launch = function(entry)
       local DQ=string.char(34); local SQ=string.char(39)
       local pn=src:match("program_name%s*=%s*"..DQ.."([^"..DQ.."]+)"..DQ) or src:match("program_name%s*=%s*"..SQ.."([^"..SQ.."]+)"..SQ)
       if pn then title=pn end
+      if src:find("no_close") or src:find("noclose") then rec.noclose=true end
     end
     rec.title=title
     local fn,err=loadfile(entry.user)
@@ -771,7 +773,7 @@ drawChrome = function()
   paintutils.drawFilledBox(1,1,W,1,C.barbg)
   if focused then
     writeAt(2,1," "..focused.title, colors.white, C.barbg)
-    if W>=8 then writeAt(W-5,1,"[_]", colors.yellow, C.barbg); writeAt(W-2,1,"[X]", colors.red, C.barbg) end
+    if W>=8 then writeAt(W-5,1,"[_]", colors.yellow, C.barbg); if not focused.noclose then writeAt(W-2,1,"[X]", colors.red, C.barbg) end end
   else
     writeAt(2,1," "..OSNAME.." v"..VERSION, C.accent, C.barbg)
   end
