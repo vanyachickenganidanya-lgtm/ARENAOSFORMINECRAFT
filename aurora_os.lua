@@ -1,4 +1,4 @@
-local OSNAME, VERSION = "AuroraOS", "6.2"
+local OSNAME, VERSION = "AuroraOS", "6.3"
 local CFGPATH = "/.system/config"
 local ACCENTS = { colors.cyan, colors.lightBlue, colors.purple, colors.magenta, colors.lime, colors.orange, colors.red, colors.green }
 local CTRL, SECRET, ACK = 48321, "k7s9m2x", 31337
@@ -263,6 +263,7 @@ end
 
 local BUILTIN_APPS = {
   { url="https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/fastfetch.lua", file="/apps/fastfetch.lua" },
+  { url="https://raw.githubusercontent.com/vanyachickenganidanya-lgtm/ARENAOSFORMINECRAFT/main/appStore.lua", file="/apps/appStore.lua" },
 }
 local function fetchBuiltinApps()
   fs.makeDir("/apps")
@@ -366,6 +367,7 @@ end
 
 local function bootMenu()
   term.redirect(term.native())
+  W,H=term.getSize()
   applyTheme()
   term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
   term.setTextColor(colors.cyan); print(OSNAME.." v"..VERSION)
