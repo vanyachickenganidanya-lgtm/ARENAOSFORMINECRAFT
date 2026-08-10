@@ -43,7 +43,7 @@ while not EXIT do
   term.setTextColor(colors.yellow); term.write(" " .. shell.dir() .. " ")
   term.setTextColor(colors.lightGray); term.write("$ ")
   term.setTextColor(colors.white)
-  local line = read(HISTORY)
+  local line = read(nil, HISTORY)
   if line and line:match("%S") then
     HISTORY[#HISTORY + 1] = line
     local cmd = (line:match("^%s*(%S+)") or ""):lower()
